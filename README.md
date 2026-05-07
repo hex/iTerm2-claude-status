@@ -152,6 +152,36 @@ Mapping at the `case "$family" in ... esac` block in `claude-status.sh`.
 
 `TRACK_LEN=10` (default) gives 10 dot positions across the full context window. With a 1M limit, the dot stays at index 0 for any percentage below 12% — you'll spend the first ~110k tokens of any session looking at `●─────────`. Lower `CLAUDE_CONTEXT_LIMIT` or raise `TRACK_LEN` for finer low-end resolution.
 
+## Extending
+
+The architecture has clean extension points if you want more signals.
+
+### The pattern
+
+Each new feature is roughly:
+1. **Compute** the value in `src/claude-status.sh` from the same transcript JSONL the existing logic already reads.
+2. **Emit** an additional OSC 1337 SetUserVar to `/dev/tty` for the new value (e.g., `user.claudeCost`).
+3. **Render** by either appending to the existing `claudeStatus` string or adding a separate iTerm2 Interpolated String component pointing at the new var.
+
+Failures in one feature don't break the others — each user var is independent. Each iTerm2 component can be toggled, recolored, or repositioned independently.
+
+### Candidate features (not implemented)
+
+These are sketches. None of them ship today; they're documented so you (or future contributors) know what's tractable.
+
+| Feature | What it shows | Approach |
+|---|---|---|
+| **Session cost (USD)** | `$0.42 today` next to the bar | Sum `input_tokens × $/Mtok + output_tokens × $/Mtok` across the transcript's assistant turns using Anthropic's [model pricing](https://www.anthropic.com/pricing#api). Emit `user.claudeCost`. New Interpolated String component. ~30 lines of bash. Pricing constants need refresh when rates change. |
+| **Threshold notification** | macOS notification on 80% / 95% context crossings | Track previous pct in `~/.cache/claude-status/last-pct`. On crossing, run `osascript -e 'display notification "..." with title "claude-status"'`. ~10 lines. No new components. |
+| **Idle time** | `idle 4m` suffix when no transcript activity > 60s | `stat -f '%m'` on the transcript, diff against `date +%s`, format. ~5 lines. Append to the status string or emit as `user.claudeIdle`. |
+| **Auto-compact warning** | `compact?` hint at ≥90% context | One conditional suffix on the existing `text` variable. ~5 lines. No new components. |
+
+### Patterns to avoid
+
+- **Per-pane scoping** is currently global-by-mtime. Doing it correctly would require Claude Code to expose its parent iTerm2 session ID (`$ITERM_SESSION_ID` from the parent shell), which it doesn't. Workarounds (process tree introspection, etc.) are fragile.
+- **iTerm2 badge integration** (the large overlay text on the terminal window) is technically possible via `\033]1337;SetBadgeFormat=<base64>\007` but the badge layer renders less smoothly than the status bar and tends to look worse, not better.
+- **Cramming everything into one user var** defeats the point of the architecture. Two values you care about → two vars → two components.
+
 ## Uninstall
 
 ```bash
