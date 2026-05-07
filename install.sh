@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ABOUTME: Installs iTerm2-claude-status by symlinking claude-status onto PATH.
-# ABOUTME: claude-status is a Claude Code statusLine command that drives both
-# ABOUTME: the Claude Code footer AND iTerm2's status bar (via OSC 1337).
+# ABOUTME: claude-status is registered as a Claude Code Stop hook that emits
+# ABOUTME: OSC 1337 SetUserVar to /dev/tty after each assistant turn.
 
 set -euo pipefail
 
@@ -38,16 +38,20 @@ fi
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Set claude-status as your Claude Code statusLine in ~/.claude/settings.json:"
+echo "1. Register claude-status as a Stop hook in ~/.claude/settings.json."
+echo "   Add to .hooks.Stop[0].hooks array (create the structure if missing):"
 echo ""
-echo '       "statusLine": {'
+echo '       {'
 echo '         "type": "command",'
 echo '         "command": "~/bin/claude-status",'
-echo '         "padding": 0'
+echo '         "timeout": 5'
 echo '       }'
 echo ""
-echo "   If you have an existing statusLine (e.g. claude-powerline), replacing it"
-echo "   means the Claude Code footer also switches to claude-status's output."
+echo "   For a programmatic merge:"
+echo ""
+echo "       jq '.hooks.Stop[0].hooks = [{\"type\":\"command\",\"command\":\"~/bin/claude-status\",\"timeout\":5}] + (.hooks.Stop[0].hooks // [])' \\"
+echo "         ~/.claude/settings.json > /tmp/settings.new && \\"
+echo "         mv /tmp/settings.new ~/.claude/settings.json"
 echo ""
 echo "2. In iTerm2: Settings -> Profiles -> Session -> Configure Status Bar..."
 echo "   Drag in an Interpolated String component and set:"
@@ -57,4 +61,5 @@ echo ""
 echo "3. (tmux users only) Add 'set -g allow-passthrough on' to your tmux.conf"
 echo "   so the OSC 1337 sequence passes through to iTerm2."
 echo ""
-echo "4. The footer + iTerm2 bar populate after Claude Code's next render."
+echo "4. The status bar populates after the next Claude Code Stop hook fires"
+echo "   (i.e., after Claude finishes responding to your next message)."

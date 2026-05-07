@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code statusLine command. Emits OSC 1337 SetUserVar to /dev/tty
-# ABOUTME: (drives iTerm2's user.claudeStatus var). Stdout is intentionally empty
-# ABOUTME: so Claude Code's footer stays blank — the bar lives in iTerm2 only.
-# ABOUTME: Reads the Claude Code session JSON from stdin when invoked as a
-# ABOUTME: statusLine; falls back to latest-mtime transcript discovery otherwise.
+# ABOUTME: Claude Code Stop hook command. Reads transcript JSONL and emits an
+# ABOUTME: OSC 1337 SetUserVar to /dev/tty so iTerm2 can render the active
+# ABOUTME: model + context in its status bar via \(user.claudeStatus).
+# ABOUTME: stdout is intentionally empty. Falls back to latest-mtime transcript
+# ABOUTME: discovery when stdin contains no transcript_path.
 
 set -u
 

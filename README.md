@@ -6,16 +6,16 @@ Live model + context indicator for [Claude Code](https://docs.claude.com/en/docs
 ✦ Opus 4.7  ──●───────  244k (24%) 🟢
 ```
 
-Driven by a Claude Code `statusLine` command that emits an OSC 1337 escape sequence as a side effect. Claude Code's own footer stays blank by design — this tool is iTerm2-status-bar only. Updates whenever Claude Code's conversation messages change (event-driven, throttled at 300ms by Claude Code itself). Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling.
+Driven by a Claude Code `Stop` hook that emits an OSC 1337 escape sequence to `/dev/tty` after each assistant turn. iTerm2 stores the value in a session-scoped user variable; an Interpolated String component reads it. Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling. No row reserved in Claude Code's TUI.
 
 ## How it works
 
-1. **`claude-status`** is registered as Claude Code's [`statusLine` command](https://code.claude.com/docs/en/statusline). Claude Code pipes session JSON to its stdin (containing `transcript_path`, `model`, etc.) and invokes the script on each conversation message change.
-2. The script writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
-3. The script's stdout is intentionally empty, so Claude Code's footer stays blank.
+1. **`claude-status`** is registered as a `Stop` hook in `~/.claude/settings.json`. Claude Code invokes it after each assistant turn ends, piping session JSON to its stdin (containing `transcript_path`, `session_id`, etc.).
+2. The script reads `transcript_path` from stdin (or falls back to mtime-based discovery), parses `message.usage` from the most recent assistant turn in the JSONL transcript, and renders the status string.
+3. It writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
 4. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
 
-Because Claude Code's statusLine is event-driven (not polled), the script only runs when there's actually new data to push. No polling overhead, no stale reads. To also see the indicator in Claude Code's footer, change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/bin/echo "$text"`.
+Because Stop hooks are event-driven (not polled), the script only runs when there's actually new data to push. No polling overhead, no stale reads, no row reserved in Claude Code's TUI footer. If you'd rather use Claude Code's `statusLine` slot (which would also render the string in the TUI footer), see the alternate setup in [Configure as statusLine instead](#configure-as-statusline-instead).
 
 ## Install
 
@@ -40,21 +40,27 @@ Both methods install a single binary `claude-status` on your PATH.
 
 Three steps — none touch your dotfiles automatically.
 
-### 1. Set claude-status as your Claude Code statusLine
+### 1. Register claude-status as a Stop hook
 
-In `~/.claude/settings.json`:
+In `~/.claude/settings.json`, add this to the `.hooks.Stop[0].hooks` array (create the structure if missing):
 
 ```json
 {
-  "statusLine": {
-    "type": "command",
-    "command": "~/bin/claude-status",
-    "padding": 0
-  }
+  "type": "command",
+  "command": "~/bin/claude-status",
+  "timeout": 5
 }
 ```
 
-If you previously used a different statusLine command (e.g. `claude-powerline`), this replaces it. The footer will switch to claude-status's compact one-line format.
+For an existing settings.json with other Stop hooks, the safest programmatic merge is:
+
+```bash
+jq '.hooks.Stop[0].hooks = [{"type":"command","command":"~/bin/claude-status","timeout":5}] + (.hooks.Stop[0].hooks // [])' \
+  ~/.claude/settings.json > /tmp/settings.new && \
+  mv /tmp/settings.new ~/.claude/settings.json
+```
+
+Adding it as the *first* entry means it runs before any blocking hook (e.g., a discoveries reminder).
 
 ### 2. Add the iTerm2 status bar component
 
@@ -80,7 +86,23 @@ The script detects `$TMUX` and wraps the OSC in tmux's passthrough envelope; you
 
 ### 4. Trigger the first render
 
-Send any message in Claude Code. After Claude responds, the statusLine fires and both surfaces populate.
+Send any message in Claude Code. After Claude responds, the Stop hook fires and the iTerm2 status bar populates.
+
+## Configure as statusLine instead
+
+If you'd rather render the indicator in Claude Code's TUI footer *as well as* the iTerm2 bar, register `claude-status` as the `statusLine` command instead of a Stop hook:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/bin/claude-status",
+    "padding": 0
+  }
+}
+```
+
+Then change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/bin/echo "$text"` so the footer renders the same string the iTerm2 bar shows. Trade-off: Claude Code reserves a row for the statusLine even when the script's stdout is empty, so leaving the script as-is would create a blank row in the TUI — that's why the default install uses a Stop hook.
 
 ## Customize
 
@@ -92,7 +114,7 @@ The percentage divides token count by `CLAUDE_CONTEXT_LIMIT` (default `1000000`)
 export CLAUDE_CONTEXT_LIMIT=200000
 ```
 
-The statusLine command inherits the value from Claude Code's process environment.
+The hook inherits the value from Claude Code's process environment.
 
 ### Thresholds
 
@@ -101,7 +123,7 @@ Three buckets, configured at the bottom of `src/claude-status.sh`:
 - 🟡 60% – 84%
 - 🔴 85% and above
 
-Edit the script to taste. Symlinks point at the repo source, so changes take effect on Claude Code's next render.
+Edit the script to taste. Symlinks point at the repo source, so changes take effect on Claude Code's next assistant turn.
 
 ### Per-family glyph
 
@@ -123,13 +145,13 @@ cd ~/GitHub/iTerm2-claude-status
 ```
 
 The script removes only the symlink it created. You'll still need to manually:
-- Restore your previous `statusLine` command in `~/.claude/settings.json` (or remove the block)
+- Remove the `claude-status` Stop hook entry from `~/.claude/settings.json`
 - Remove the Interpolated String component from iTerm2
 
 ## Limitations
 
 - **Per-pane scoping is intentional but absolute.** The user variable is set in the iTerm2 session where Claude Code is running. Other panes' status bars stay blank — they have no way of knowing about Claude sessions elsewhere.
-- **Replaces your current statusLine.** If you used claude-powerline or another statusLine command, this takes its place. Restore the old one via uninstall.sh's instructions if you switch back.
+- **Stop hook fires per assistant turn.** Mid-turn (while Claude is thinking), the bar shows the post-state of the *previous* turn. Token counts don't change mid-turn, so this is correct, but if you want a "Claude is working…" indicator that's a separate hook.
 - **Context % reads cumulative transcript tokens.** The number reflects what's in the JSONL transcript file — if Claude Code has compacted the conversation internally, the displayed % may exceed what's actually loaded in working memory.
 - **Model context-window mode (200k vs 1M) isn't auto-detected.** The transcript stores the base model id (`claude-opus-4-7`) without the `[1m]` suffix that indicates 1M-context mode. Configure via `CLAUDE_CONTEXT_LIMIT`.
 - **macOS only.** Uses `stat -f`, `tail -r`, OSC 1337 (an iTerm2-specific escape sequence). Linux equivalents require porting `stat -c`, `tac`, and a different terminal that honors iTerm2 escapes.
