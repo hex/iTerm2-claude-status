@@ -21,22 +21,13 @@ Because Stop hooks are event-driven (not polled), the script only runs when ther
 
 ## Install
 
-### From source
-
 ```bash
 git clone https://github.com/hex/iTerm2-claude-status.git ~/GitHub/iTerm2-claude-status
 cd ~/GitHub/iTerm2-claude-status
 ./install.sh
 ```
 
-### Homebrew
-
-```bash
-brew tap hex/tap
-brew install iterm2-claude-status
-```
-
-Both methods install a single binary `claude-status` on your PATH.
+Installs a single binary `claude-status` symlinked into `~/bin/`. Make sure `~/bin` is on your `PATH`.
 
 ## Configure
 
