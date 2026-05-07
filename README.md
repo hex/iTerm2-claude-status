@@ -88,9 +88,24 @@ The script detects `$TMUX` and wraps the OSC in tmux's passthrough envelope; you
 
 Send any message in Claude Code. After Claude responds, the Stop hook fires and the iTerm2 status bar populates.
 
+## Why a Stop hook?
+
+Claude Code's [`statusLine` slot](https://code.claude.com/docs/en/statusline) is the more obvious place to put a status renderer — it's documented for exactly this purpose, receives a richer JSON payload via stdin, and fires on every conversation message change. We don't use it. Two reasons:
+
+1. **Empty stdout still reserves a TUI row.** Claude Code allocates a screen row for the statusLine output even when the script prints nothing. For an iTerm2-status-bar-only tool, that row is a permanent blank line in your Claude Code footer. There's no setting to collapse it. A Stop hook's stdout is ignored entirely (Claude Code only inspects exit code + the `stop_hook_active` JSON field for "force continue" control signals), so empty output costs zero screen real estate.
+2. **Same effective cadence, lower coupling.** Stop hooks fire once per assistant turn end. statusLine fires on every conversation message change (event-driven, ~300ms throttle). For "show me how full context is now," both update at roughly the same useful frequency — token counts only move per-turn. Switching to Stop hook also avoids replacing whatever statusLine command was already there (e.g., `claude-powerline`).
+
+We considered other hook types and ruled them out:
+
+- **`PostToolUse`** fires after each tool call, so it would update mid-turn. But each invocation runs *inline* with tool execution, adding ~150ms latency to every tool. Across a turn with many tool calls, the lag compounds.
+- **`UserPromptSubmit`** fires before the new turn begins, so the latest assistant `message.usage` it can read is always one turn stale. Wrong moment.
+- **`SessionStart`** / **`SessionEnd`** are too coarse — once-per-session, not once-per-turn.
+
+If your preference is the opposite — you'd rather render the indicator in Claude Code's TUI footer *and* the iTerm2 bar, and you don't mind the row being there — see the next section.
+
 ## Configure as statusLine instead
 
-If you'd rather render the indicator in Claude Code's TUI footer *as well as* the iTerm2 bar, register `claude-status` as the `statusLine` command instead of a Stop hook:
+Register `claude-status` as the `statusLine` command (instead of, or in addition to, a Stop hook):
 
 ```json
 {
@@ -102,7 +117,7 @@ If you'd rather render the indicator in Claude Code's TUI footer *as well as* th
 }
 ```
 
-Then change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/bin/echo "$text"` so the footer renders the same string the iTerm2 bar shows. Trade-off: Claude Code reserves a row for the statusLine even when the script's stdout is empty, so leaving the script as-is would create a blank row in the TUI — that's why the default install uses a Stop hook.
+Then change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/bin/echo "$text"` so the footer renders the same string the iTerm2 bar shows.
 
 ## Customize
 
