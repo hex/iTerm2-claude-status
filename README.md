@@ -1,22 +1,21 @@
 # iTerm2-claude-status
 
-Live model + context indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) sessions, rendered in **both** Claude Code's footer and iTerm2's status bar from a single `statusLine` command.
+Live model + context indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) sessions, rendered in iTerm2's status bar.
 
 ```
 ✦ Opus 4.7  ──●───────  244k (24%) 🟢
 ```
 
-The same string appears at the bottom of your Claude Code TUI and in your iTerm2 status bar. Updates whenever Claude Code's conversation messages change (per-turn, throttled at 300ms by Claude Code itself). Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling.
+Driven by a Claude Code `statusLine` command that emits an OSC 1337 escape sequence as a side effect. Claude Code's own footer stays blank by design — this tool is iTerm2-status-bar only. Updates whenever Claude Code's conversation messages change (event-driven, throttled at 300ms by Claude Code itself). Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling.
 
 ## How it works
 
-One script, two outputs:
+1. **`claude-status`** is registered as Claude Code's [`statusLine` command](https://code.claude.com/docs/en/statusline). Claude Code pipes session JSON to its stdin (containing `transcript_path`, `model`, etc.) and invokes the script on each conversation message change.
+2. The script writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
+3. The script's stdout is intentionally empty, so Claude Code's footer stays blank.
+4. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
 
-1. **`claude-status`** runs as Claude Code's [`statusLine` command](https://code.claude.com/docs/en/statusline). Claude Code pipes session JSON to its stdin (containing `transcript_path`, `model`, etc.), invokes it on each conversation message change, and renders the script's first line of stdout as the footer.
-2. The same script *also* writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty` as a side effect. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
-3. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
-
-Because Claude Code's statusLine is event-driven (not polled), the script only runs when there's actually new data to render. No polling overhead, no stale reads.
+Because Claude Code's statusLine is event-driven (not polled), the script only runs when there's actually new data to push. No polling overhead, no stale reads. To also see the indicator in Claude Code's footer, change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/bin/echo "$text"`.
 
 ## Install
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code statusLine command. Outputs the status string to stdout
-# ABOUTME: (becomes Claude Code's footer) AND emits OSC 1337 to /dev/tty (drives
-# ABOUTME: iTerm2's user.claudeStatus var). Reads the Claude Code session JSON
-# ABOUTME: from stdin when invoked as a statusLine; falls back to latest-mtime
-# ABOUTME: transcript discovery when invoked manually.
+# ABOUTME: Claude Code statusLine command. Emits OSC 1337 SetUserVar to /dev/tty
+# ABOUTME: (drives iTerm2's user.claudeStatus var). Stdout is intentionally empty
+# ABOUTME: so Claude Code's footer stays blank — the bar lives in iTerm2 only.
+# ABOUTME: Reads the Claude Code session JSON from stdin when invoked as a
+# ABOUTME: statusLine; falls back to latest-mtime transcript discovery otherwise.
 
 set -u
 
@@ -109,5 +109,7 @@ else
   { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
 fi
 
-# 4. Primary output: stdout = Claude Code's footer string.
-/bin/echo "$text"
+# 4. Primary output: empty stdout. Claude Code's footer stays blank — this
+#    script is iTerm2-status-bar only. To restore the footer rendering, change
+#    the next line back to: /bin/echo "$text"
+/bin/echo -n ""
