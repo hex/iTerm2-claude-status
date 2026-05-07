@@ -8,14 +8,15 @@ Live model + context indicator for [Claude Code](https://docs.claude.com/en/docs
 ✦ Opus 4.7  ──●───────  244k (24%) 🟢
 ```
 
-Driven by Claude Code `Stop` and `SessionStart` hooks that emit an OSC 1337 escape sequence to `/dev/tty`. iTerm2 stores the value in a session-scoped user variable; an Interpolated String component reads it. Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling. No row reserved in Claude Code's TUI.
+Driven by Claude Code `Stop`, `SessionStart`, and `SessionEnd` hooks that emit an OSC 1337 escape sequence to `/dev/tty`. iTerm2 stores the value in a session-scoped user variable; an Interpolated String component reads it. Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling. No row reserved in Claude Code's TUI.
 
 ## How it works
 
-1. **`claude-status`** is registered as both a `Stop` hook and a `SessionStart` hook in `~/.claude/settings.json`. Claude Code invokes it on session open and after each assistant turn, piping session JSON to its stdin (containing `transcript_path`, `model`, `session_id`, etc.).
-2. The script reads `transcript_path` from stdin (or falls back to mtime-based discovery), parses `message.usage` from the most recent assistant turn in the JSONL transcript, and renders the status string. If the transcript exists but has no assistant messages yet (fresh session), it falls back to the model name from the stdin payload and `0 (0%)`.
-3. It writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
-4. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
+1. **`claude-status`** is registered as `Stop`, `SessionStart`, and `SessionEnd` hooks in `~/.claude/settings.json`. Claude Code invokes it at the relevant lifecycle moments, piping session JSON to its stdin.
+2. **On Stop or SessionStart**, the script reads `transcript_path` from stdin (or falls back to mtime-based discovery), parses `message.usage` from the most recent assistant turn, and renders the status string. Fresh-session fallback uses the model name from stdin and `0 (0%)`.
+3. **On SessionEnd**, the script emits an *empty* user var so the status bar clears — no ghost data after Claude exits, after `/clear`, or after `/quit`.
+4. The script writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
+5. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
 
 Because Stop hooks are event-driven (not polled), the script only runs when there's actually new data to push. No polling overhead, no stale reads, no row reserved in Claude Code's TUI footer. If you'd rather use Claude Code's `statusLine` slot (which would also render the string in the TUI footer), see the alternate setup in [Configure as statusLine instead](#configure-as-statusline-instead).
 
@@ -33,9 +34,9 @@ Installs a single binary `claude-status` symlinked into `~/bin/`. Make sure `~/b
 
 Three steps — none touch your dotfiles automatically.
 
-### 1. Register claude-status as Stop and SessionStart hooks
+### 1. Register claude-status as Stop, SessionStart, and SessionEnd hooks
 
-In `~/.claude/settings.json`, add this entry to **both** `.hooks.Stop[0].hooks` *and* `.hooks.SessionStart[0].hooks`:
+In `~/.claude/settings.json`, add this entry to all three of `.hooks.Stop[0].hooks`, `.hooks.SessionStart[0].hooks`, and `.hooks.SessionEnd[0].hooks`:
 
 ```json
 {
@@ -46,7 +47,8 @@ In `~/.claude/settings.json`, add this entry to **both** `.hooks.Stop[0].hooks` 
 ```
 
 - **Stop** updates the bar after each assistant turn (when token counts change).
-- **SessionStart** populates the bar when you open a new pane, so it doesn't stay blank waiting for the first response. The script handles the empty-transcript case by reading the model from the SessionStart JSON payload and showing `0 (0%)`.
+- **SessionStart** populates the bar when a pane opens so it doesn't stay blank waiting for the first response.
+- **SessionEnd** clears the bar (emits empty user var) so closed sessions don't leave ghost data.
 
 For programmatic merging into an existing settings.json:
 
@@ -54,8 +56,10 @@ For programmatic merging into an existing settings.json:
 jq '
   (.hooks.Stop // [{"hooks":[]}]) as $stop
   | (.hooks.SessionStart // [{"hooks":[]}]) as $start
+  | (.hooks.SessionEnd // [{"hooks":[]}]) as $end
   | .hooks.Stop = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($stop[0].hooks // [])}]
   | .hooks.SessionStart = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($start[0].hooks // [])}]
+  | .hooks.SessionEnd = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($end[0].hooks // [])}]
 ' ~/.claude/settings.json > /tmp/settings.new && \
   mv /tmp/settings.new ~/.claude/settings.json
 ```
@@ -123,10 +127,18 @@ Then change the last line of `src/claude-status.sh` from `/bin/echo -n ""` to `/
 
 ### Context window limit
 
-The percentage divides token count by `CLAUDE_CONTEXT_LIMIT` (default `1000000`). To use the standard 200k Anthropic context, set the env var in your shell rc:
+The percentage divides token count by a context limit that's auto-detected per model family:
+
+| Family | Default limit |
+|---|---|
+| Opus (any version) | 1,000,000 (1M tokens — Anthropic's extended-context default for Opus) |
+| Sonnet, Haiku | 200,000 (Anthropic's standard context) |
+| Unknown | 1,000,000 (most generous fallback) |
+
+To override, set `CLAUDE_CONTEXT_LIMIT` in your shell rc:
 
 ```bash
-export CLAUDE_CONTEXT_LIMIT=200000
+export CLAUDE_CONTEXT_LIMIT=200000   # if you're running Opus on default 200k context
 ```
 
 The hook inherits the value from Claude Code's process environment.
@@ -190,7 +202,7 @@ cd ~/GitHub/iTerm2-claude-status
 ```
 
 The script removes only the symlink it created. You'll still need to manually:
-- Remove the `claude-status` entries from `.hooks.Stop` and `.hooks.SessionStart` in `~/.claude/settings.json`
+- Remove the `claude-status` entries from `.hooks.Stop`, `.hooks.SessionStart`, and `.hooks.SessionEnd` in `~/.claude/settings.json`
 - Remove the Interpolated String component from iTerm2
 
 ## Limitations

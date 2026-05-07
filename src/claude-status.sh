@@ -1,16 +1,34 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code Stop/SessionStart hook. Emits an OSC 1337 SetUserVar to
-# ABOUTME: /dev/tty so iTerm2 renders model + context via \(user.claudeStatus).
+# ABOUTME: Claude Code Stop/SessionStart/SessionEnd hook. Emits an OSC 1337
+# ABOUTME: SetUserVar to /dev/tty so iTerm2 renders model + context in user.claudeStatus.
 
 set -u
 
-CONTEXT_LIMIT="${CLAUDE_CONTEXT_LIMIT:-1000000}"
 TRACK_LEN=10
 PROJECTS_DIR="$HOME/.claude/projects"
+
+emit_osc() {
+  local b64
+  b64=$(/bin/echo -n "$1" | /usr/bin/base64)
+  local osc
+  osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
+  if [ -n "${TMUX:-}" ]; then
+    { /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty; } 2>/dev/null || true
+  else
+    { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
+  fi
+}
 
 input=""
 if [ -p /dev/stdin ]; then
   input=$(</dev/stdin)
+fi
+
+# SessionEnd path: clear the bar so it doesn't show ghost data after Claude exits.
+if [ -n "$input" ] && \
+   [ "$(/usr/bin/jq -r '.hook_event_name // empty' <<<"$input" 2>/dev/null)" = "SessionEnd" ]; then
+  emit_osc ""
+  exit 0
 fi
 
 transcript=""
@@ -31,8 +49,8 @@ fi
 model_id=""
 tokens=0
 if [ -n "${transcript:-}" ] && [ -f "$transcript" ]; then
-  # Stream from the end; jq emits one TSV row per assistant turn. head -n1
-  # closes the pipe on first match, jq dies via SIGPIPE — O(1) memory.
+  # Stream from the end; head -n1 closes the pipe on first match, jq dies via
+  # SIGPIPE — O(1) memory.
   data=$(
     /usr/bin/tail -r "$transcript" 2>/dev/null \
     | /usr/bin/jq -r 'select(.type=="assistant" and .message.usage)
@@ -71,6 +89,20 @@ case "$family" in
   *)      glyph="✱" ;;
 esac
 
+# Per-family context-window default. Override with CLAUDE_CONTEXT_LIMIT env var.
+# Opus 4.x defaults to 1M tokens; Sonnet/Haiku default to 200k. Unknown models
+# get the most generous default (1M) so they don't show >100% before the user
+# realizes they need to override.
+if [ -n "${CLAUDE_CONTEXT_LIMIT:-}" ]; then
+  CONTEXT_LIMIT="$CLAUDE_CONTEXT_LIMIT"
+else
+  case "$family" in
+    Opus)             CONTEXT_LIMIT=1000000 ;;
+    Sonnet|Haiku)     CONTEXT_LIMIT=200000  ;;
+    *)                CONTEXT_LIMIT=1000000 ;;
+  esac
+fi
+
 pct=$((tokens * 100 / CONTEXT_LIMIT))
 [ "$pct" -gt 100 ] && pct=100
 
@@ -94,14 +126,4 @@ elif [ "$pct" -ge 60 ]; then emoji="🟡"
 else                          emoji="🟢"
 fi
 
-text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
-
-# Brace group catches shell-level redirect errors (e.g. "Device not configured"
-# when invoked without a controlling tty) along with the command's own stderr.
-b64=$(/bin/echo -n "$text" | /usr/bin/base64)
-osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
-if [ -n "${TMUX:-}" ]; then
-  { /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty; } 2>/dev/null || true
-else
-  { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
-fi
+emit_osc "$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"

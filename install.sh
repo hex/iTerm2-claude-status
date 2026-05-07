@@ -11,6 +11,17 @@ SRC_DIR="$REPO_DIR/src"
 BIN_DIR="$HOME/bin"
 DATA_TARGET="$BIN_DIR/claude-status"
 
+# Pre-flight dependency check.
+missing=()
+for dep in jq; do
+    command -v "$dep" >/dev/null 2>&1 || missing+=("$dep")
+done
+if [ "${#missing[@]}" -gt 0 ]; then
+    echo "ERROR: required dependencies missing: ${missing[*]}" >&2
+    echo "Install with: brew install ${missing[*]}" >&2
+    exit 1
+fi
+
 mkdir -p "$BIN_DIR"
 
 link() {
@@ -38,8 +49,8 @@ fi
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Register claude-status as Stop AND SessionStart hooks in ~/.claude/settings.json."
-echo "   Add to .hooks.Stop[0].hooks array (create the structure if missing):"
+echo "1. Register claude-status as Stop, SessionStart, AND SessionEnd hooks in ~/.claude/settings.json."
+echo "   Add to .hooks.Stop[0].hooks, .hooks.SessionStart[0].hooks, and .hooks.SessionEnd[0].hooks (create structures if missing):"
 echo ""
 echo '       {'
 echo '         "type": "command",'

@@ -24,5 +24,5 @@ remove "$DATA_TARGET"
 
 echo ""
 echo "Manual cleanup still required:"
-echo "  - Remove the claude-status entries from .hooks.Stop and .hooks.SessionStart in ~/.claude/settings.json"
+echo "  - Remove the claude-status entries from .hooks.Stop, .hooks.SessionStart, and .hooks.SessionEnd in ~/.claude/settings.json"
 echo "  - Remove the Interpolated String component from iTerm2's status bar"
