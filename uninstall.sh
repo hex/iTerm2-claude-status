@@ -4,7 +4,6 @@
 set -euo pipefail
 
 DATA_TARGET="$HOME/bin/claude-status"
-HOOK_TARGET="$HOME/.claude/hooks/iterm-claude-status.sh"
 
 remove() {
     local dst="$1"
@@ -22,9 +21,9 @@ remove() {
 
 echo "Uninstalling iTerm2-claude-status"
 remove "$DATA_TARGET"
-remove "$HOOK_TARGET"
 
 echo ""
 echo "Manual cleanup still required:"
-echo "  - Remove the iterm-claude-status hook entry from ~/.claude/settings.json"
+echo "  - Restore your previous statusLine command in ~/.claude/settings.json"
+echo "    (or remove the statusLine block entirely)"
 echo "  - Remove the Interpolated String component from iTerm2's status bar"

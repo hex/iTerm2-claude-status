@@ -1,30 +1,41 @@
 #!/usr/bin/env bash
-# ABOUTME: Renders a single-line status string for the active Claude Code session,
-# ABOUTME: meant to be consumed by ~/.claude/hooks/iterm-claude-status.sh and pushed to
-# ABOUTME: iTerm2 via OSC 1337 SetUserVar (user.claudeStatus).
+# ABOUTME: Claude Code statusLine command. Outputs the status string to stdout
+# ABOUTME: (becomes Claude Code's footer) AND emits OSC 1337 to /dev/tty (drives
+# ABOUTME: iTerm2's user.claudeStatus var). Reads the Claude Code session JSON
+# ABOUTME: from stdin when invoked as a statusLine; falls back to latest-mtime
+# ABOUTME: transcript discovery when invoked manually.
 
 set -u
 
-PROJECTS_DIR="$HOME/.claude/projects"
 CONTEXT_LIMIT="${CLAUDE_CONTEXT_LIMIT:-1000000}"
-STALE_AFTER_SECONDS=$((60 * 60 * 6))
 TRACK_LEN=10
+PROJECTS_DIR="$HOME/.claude/projects"
 
-[ -d "$PROJECTS_DIR" ] || exit 0
+# 1. Get transcript path: prefer stdin JSON (Claude Code statusLine provides it).
+input=""
+if [ -p /dev/stdin ]; then
+  input=$(/bin/cat)
+fi
 
-transcript=$(
-  /usr/bin/find "$PROJECTS_DIR" -name "*.jsonl" -type f \
-    -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
-    | /usr/bin/sort -rn \
-    | /usr/bin/awk 'NR==1 { $1=""; sub(/^ /, ""); print; exit }'
-)
+transcript=""
+if [ -n "$input" ]; then
+  transcript=$(/usr/bin/jq -r '.transcript_path // empty' <<<"$input" 2>/dev/null)
+fi
+
+if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
+  [ -d "$PROJECTS_DIR" ] || exit 0
+  transcript=$(
+    /usr/bin/find "$PROJECTS_DIR" -name "*.jsonl" -type f \
+      -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
+      | /usr/bin/sort -rn \
+      | /usr/bin/awk 'NR==1 { $1=""; sub(/^ /, ""); print; exit }'
+  )
+fi
 
 [ -z "${transcript:-}" ] && exit 0
+[ ! -f "$transcript" ] && exit 0
 
-mtime=$(/usr/bin/stat -f '%m' "$transcript" 2>/dev/null || echo 0)
-now=$(/bin/date +%s)
-[ $((now - mtime)) -gt "$STALE_AFTER_SECONDS" ] && exit 0
-
+# 2. Extract model + token usage from the most recent assistant turn.
 data=$(
   /usr/bin/tail -r "$transcript" 2>/dev/null \
   | /usr/bin/jq -rs '
@@ -85,4 +96,19 @@ elif [ "$pct" -ge 60 ]; then emoji="🟡"
 else                          emoji="🟢"
 fi
 
-/bin/echo "$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
+text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
+
+# 3. Side effect: push to iTerm2 via OSC 1337 SetUserVar.
+#    Skip if /dev/tty isn't writable (e.g. invoked from a non-TTY subprocess).
+if [ -w /dev/tty ]; then
+  b64=$(/bin/echo -n "$text" | /usr/bin/base64)
+  osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
+  if [ -n "${TMUX:-}" ]; then
+    /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty
+  else
+    /usr/bin/printf '%s' "$osc" > /dev/tty
+  fi
+fi
+
+# 4. Primary output: stdout = Claude Code's footer string.
+/bin/echo "$text"
