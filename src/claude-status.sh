@@ -20,8 +20,13 @@ emit_osc() {
 }
 
 input=""
-if [ -p /dev/stdin ]; then
-  input=$(</dev/stdin)
+if [ ! -t 0 ]; then
+  # Read stdin with a per-line 1s timeout so we never hang on edge cases
+  # (open-but-empty stdin from non-pipe environments). Hooks fire fast,
+  # so the timeout never triggers in real invocations.
+  while IFS= read -r -t 1 line 2>/dev/null; do
+    input+="$line"$'\n'
+  done
 fi
 
 # SessionEnd path: clear the bar so it doesn't show ghost data after Claude exits.
