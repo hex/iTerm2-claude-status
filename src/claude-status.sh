@@ -98,16 +98,15 @@ fi
 
 text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
 
-# 3. Side effect: push to iTerm2 via OSC 1337 SetUserVar.
-#    Skip if /dev/tty isn't writable (e.g. invoked from a non-TTY subprocess).
-if [ -w /dev/tty ]; then
-  b64=$(/bin/echo -n "$text" | /usr/bin/base64)
-  osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
-  if [ -n "${TMUX:-}" ]; then
-    /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty
-  else
-    /usr/bin/printf '%s' "$osc" > /dev/tty
-  fi
+# 3. Side effect: push to iTerm2 via OSC 1337 SetUserVar. Brace group
+#    redirects shell-level errors (e.g. "Device not configured" when there's
+#    no controlling terminal) along with the command's own stderr.
+b64=$(/bin/echo -n "$text" | /usr/bin/base64)
+osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
+if [ -n "${TMUX:-}" ]; then
+  { /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty; } 2>/dev/null || true
+else
+  { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
 fi
 
 # 4. Primary output: stdout = Claude Code's footer string.
