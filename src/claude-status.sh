@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code Stop hook command. Reads transcript JSONL and emits an
-# ABOUTME: OSC 1337 SetUserVar to /dev/tty so iTerm2 can render the active
-# ABOUTME: model + context in its status bar via \(user.claudeStatus).
-# ABOUTME: stdout is intentionally empty. Falls back to latest-mtime transcript
-# ABOUTME: discovery when stdin contains no transcript_path.
+# ABOUTME: Claude Code Stop/SessionStart hook. Emits an OSC 1337 SetUserVar to
+# ABOUTME: /dev/tty so iTerm2 renders model + context via \(user.claudeStatus).
 
 set -u
 
@@ -11,10 +8,9 @@ CONTEXT_LIMIT="${CLAUDE_CONTEXT_LIMIT:-1000000}"
 TRACK_LEN=10
 PROJECTS_DIR="$HOME/.claude/projects"
 
-# 1. Get transcript path: prefer stdin JSON (Claude Code statusLine provides it).
 input=""
 if [ -p /dev/stdin ]; then
-  input=$(/bin/cat)
+  input=$(</dev/stdin)
 fi
 
 transcript=""
@@ -32,52 +28,41 @@ if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
   )
 fi
 
-# 2. Extract model + token usage from the most recent assistant turn.
-#    If the transcript is missing or has no assistant messages yet (e.g.,
-#    SessionStart fires before any turns have happened), fall back to the
-#    model from the stdin JSON and zero tokens — produces a baseline
-#    "fresh session" status.
-data=""
+model_id=""
+tokens=0
 if [ -n "${transcript:-}" ] && [ -f "$transcript" ]; then
+  # Stream from the end; jq emits one TSV row per assistant turn. head -n1
+  # closes the pipe on first match, jq dies via SIGPIPE — O(1) memory.
   data=$(
     /usr/bin/tail -r "$transcript" 2>/dev/null \
-    | /usr/bin/jq -rs '
-        map(select(.type=="assistant" and .message.usage))
-        | select(length > 0)
-        | .[0]
+    | /usr/bin/jq -r 'select(.type=="assistant" and .message.usage)
         | [ .message.model // "unknown",
             ( (.message.usage.input_tokens // 0)
             + (.message.usage.cache_creation_input_tokens // 0)
             + (.message.usage.cache_read_input_tokens // 0) ) ]
-        | @tsv
-      ' 2>/dev/null
+        | @tsv' 2>/dev/null \
+    | /usr/bin/head -n1
   )
+  [ -n "$data" ] && IFS=$'\t' read -r model_id tokens <<<"$data"
 fi
 
-if [ -n "${data:-}" ]; then
-  model_id="${data%	*}"
-  tokens="${data##*	}"
+# Fresh-session fallback: empty transcript means model_id stayed "". Get it
+# from the SessionStart stdin JSON instead; tokens stays at 0.
+if [ -z "$model_id" ] && [ -n "$input" ]; then
+  model_id=$(/usr/bin/jq -r '.model.id // .model.display_name // .model // "unknown"' <<<"$input" 2>/dev/null)
+fi
+if [ -z "$model_id" ] || [ "$model_id" = "null" ]; then
+  model_id="unknown"
+fi
+
+if [[ "$model_id" =~ ^claude-([a-z]+)-([0-9]+)-([0-9]+) ]]; then
+  fam_lower="${BASH_REMATCH[1]}"
+  family="$(/usr/bin/tr '[:lower:]' '[:upper:]' <<<"${fam_lower:0:1}")${fam_lower:1}"
+  display_model="$family ${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
 else
-  # Fresh session path: get model from stdin JSON, tokens=0.
-  model_id=""
-  if [ -n "$input" ]; then
-    model_id=$(/usr/bin/jq -r '.model.id // .model.display_name // .model // "unknown"' <<<"$input" 2>/dev/null)
-  fi
-  [ -z "${model_id:-}" ] || [ "$model_id" = "null" ] && model_id="unknown"
-  tokens=0
+  family="Unknown"
+  display_model="$model_id"
 fi
-
-read -r family display_model < <(
-  /bin/echo "$model_id" \
-  | /usr/bin/awk -F'-' '
-      /^claude-/ {
-        fam = toupper(substr($2, 1, 1)) substr($2, 2);
-        printf "%s %s %s.%s\n", fam, fam, $3, $4;
-        exit
-      }
-      { printf "Unknown %s\n", $0; exit }
-    '
-)
 
 case "$family" in
   Opus)   glyph="✦" ;;
@@ -87,7 +72,6 @@ case "$family" in
 esac
 
 pct=$((tokens * 100 / CONTEXT_LIMIT))
-[ "$pct" -lt 0 ] && pct=0
 [ "$pct" -gt 100 ] && pct=100
 
 pos=$(( pct * (TRACK_LEN - 1) / 100 ))
@@ -112,9 +96,8 @@ fi
 
 text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
 
-# 3. Side effect: push to iTerm2 via OSC 1337 SetUserVar. Brace group
-#    redirects shell-level errors (e.g. "Device not configured" when there's
-#    no controlling terminal) along with the command's own stderr.
+# Brace group catches shell-level redirect errors (e.g. "Device not configured"
+# when invoked without a controlling tty) along with the command's own stderr.
 b64=$(/bin/echo -n "$text" | /usr/bin/base64)
 osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
 if [ -n "${TMUX:-}" ]; then
@@ -122,8 +105,3 @@ if [ -n "${TMUX:-}" ]; then
 else
   { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
 fi
-
-# 4. Primary output: empty stdout. Claude Code's footer stays blank — this
-#    script is iTerm2-status-bar only. To restore the footer rendering, change
-#    the next line back to: /bin/echo "$text"
-/bin/echo -n ""
