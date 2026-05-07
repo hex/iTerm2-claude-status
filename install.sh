@@ -38,7 +38,7 @@ fi
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Register claude-status as a Stop hook in ~/.claude/settings.json."
+echo "1. Register claude-status as Stop AND SessionStart hooks in ~/.claude/settings.json."
 echo "   Add to .hooks.Stop[0].hooks array (create the structure if missing):"
 echo ""
 echo '       {'

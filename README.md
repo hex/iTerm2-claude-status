@@ -2,16 +2,18 @@
 
 Live model + context indicator for [Claude Code](https://docs.claude.com/en/docs/claude-code) sessions, rendered in iTerm2's status bar.
 
+![iTerm2 status bar showing the Claude Code model and context indicator](assets/screenshot.png)
+
 ```
 ✦ Opus 4.7  ──●───────  244k (24%) 🟢
 ```
 
-Driven by a Claude Code `Stop` hook that emits an OSC 1337 escape sequence to `/dev/tty` after each assistant turn. iTerm2 stores the value in a session-scoped user variable; an Interpolated String component reads it. Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling. No row reserved in Claude Code's TUI.
+Driven by Claude Code `Stop` and `SessionStart` hooks that emit an OSC 1337 escape sequence to `/dev/tty`. iTerm2 stores the value in a session-scoped user variable; an Interpolated String component reads it. Per-pane scoping — each iTerm2 pane shows only the Claude session running in *that* pane. Pure shell + jq, no Python runtime, no daemon, no polling. No row reserved in Claude Code's TUI.
 
 ## How it works
 
-1. **`claude-status`** is registered as a `Stop` hook in `~/.claude/settings.json`. Claude Code invokes it after each assistant turn ends, piping session JSON to its stdin (containing `transcript_path`, `session_id`, etc.).
-2. The script reads `transcript_path` from stdin (or falls back to mtime-based discovery), parses `message.usage` from the most recent assistant turn in the JSONL transcript, and renders the status string.
+1. **`claude-status`** is registered as both a `Stop` hook and a `SessionStart` hook in `~/.claude/settings.json`. Claude Code invokes it on session open and after each assistant turn, piping session JSON to its stdin (containing `transcript_path`, `model`, `session_id`, etc.).
+2. The script reads `transcript_path` from stdin (or falls back to mtime-based discovery), parses `message.usage` from the most recent assistant turn in the JSONL transcript, and renders the status string. If the transcript exists but has no assistant messages yet (fresh session), it falls back to the model name from the stdin payload and `0 (0%)`.
 3. It writes an [OSC 1337 `SetUserVar`](https://iterm2.com/documentation-escape-codes.html) escape sequence to `/dev/tty`. iTerm2 stores the value as a session-scoped user variable named `claudeStatus`.
 4. An **Interpolated String** component in iTerm2's status bar reads `\(user.claudeStatus)` and renders it.
 
@@ -40,9 +42,9 @@ Both methods install a single binary `claude-status` on your PATH.
 
 Three steps — none touch your dotfiles automatically.
 
-### 1. Register claude-status as a Stop hook
+### 1. Register claude-status as Stop and SessionStart hooks
 
-In `~/.claude/settings.json`, add this to the `.hooks.Stop[0].hooks` array (create the structure if missing):
+In `~/.claude/settings.json`, add this entry to **both** `.hooks.Stop[0].hooks` *and* `.hooks.SessionStart[0].hooks`:
 
 ```json
 {
@@ -52,15 +54,22 @@ In `~/.claude/settings.json`, add this to the `.hooks.Stop[0].hooks` array (crea
 }
 ```
 
-For an existing settings.json with other Stop hooks, the safest programmatic merge is:
+- **Stop** updates the bar after each assistant turn (when token counts change).
+- **SessionStart** populates the bar when you open a new pane, so it doesn't stay blank waiting for the first response. The script handles the empty-transcript case by reading the model from the SessionStart JSON payload and showing `0 (0%)`.
+
+For programmatic merging into an existing settings.json:
 
 ```bash
-jq '.hooks.Stop[0].hooks = [{"type":"command","command":"~/bin/claude-status","timeout":5}] + (.hooks.Stop[0].hooks // [])' \
-  ~/.claude/settings.json > /tmp/settings.new && \
+jq '
+  (.hooks.Stop // [{"hooks":[]}]) as $stop
+  | (.hooks.SessionStart // [{"hooks":[]}]) as $start
+  | .hooks.Stop = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($stop[0].hooks // [])}]
+  | .hooks.SessionStart = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($start[0].hooks // [])}]
+' ~/.claude/settings.json > /tmp/settings.new && \
   mv /tmp/settings.new ~/.claude/settings.json
 ```
 
-Adding it as the *first* entry means it runs before any blocking hook (e.g., a discoveries reminder).
+Adding it as the *first* entry in each array means it runs before any blocking hook (e.g., a discoveries reminder).
 
 ### 2. Add the iTerm2 status bar component
 
@@ -86,7 +95,7 @@ The script detects `$TMUX` and wraps the OSC in tmux's passthrough envelope; you
 
 ### 4. Trigger the first render
 
-Send any message in Claude Code. After Claude responds, the Stop hook fires and the iTerm2 status bar populates.
+Open a new Claude Code pane. The SessionStart hook fires immediately and populates the bar with `Model · 0 (0%) 🟢`. After your first message + response, the Stop hook overwrites it with real token counts.
 
 ## Why a Stop hook?
 
@@ -190,7 +199,7 @@ cd ~/GitHub/iTerm2-claude-status
 ```
 
 The script removes only the symlink it created. You'll still need to manually:
-- Remove the `claude-status` Stop hook entry from `~/.claude/settings.json`
+- Remove the `claude-status` entries from `.hooks.Stop` and `.hooks.SessionStart` in `~/.claude/settings.json`
 - Remove the Interpolated String component from iTerm2
 
 ## Limitations

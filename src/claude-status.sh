@@ -32,26 +32,40 @@ if [ -z "$transcript" ] || [ ! -f "$transcript" ]; then
   )
 fi
 
-[ -z "${transcript:-}" ] && exit 0
-[ ! -f "$transcript" ] && exit 0
-
 # 2. Extract model + token usage from the most recent assistant turn.
-data=$(
-  /usr/bin/tail -r "$transcript" 2>/dev/null \
-  | /usr/bin/jq -rs '
-      map(select(.type=="assistant" and .message.usage))[0]
-      | [ .message.model // "unknown",
-          ( (.message.usage.input_tokens // 0)
-          + (.message.usage.cache_creation_input_tokens // 0)
-          + (.message.usage.cache_read_input_tokens // 0) ) ]
-      | @tsv
-    ' 2>/dev/null
-)
+#    If the transcript is missing or has no assistant messages yet (e.g.,
+#    SessionStart fires before any turns have happened), fall back to the
+#    model from the stdin JSON and zero tokens — produces a baseline
+#    "fresh session" status.
+data=""
+if [ -n "${transcript:-}" ] && [ -f "$transcript" ]; then
+  data=$(
+    /usr/bin/tail -r "$transcript" 2>/dev/null \
+    | /usr/bin/jq -rs '
+        map(select(.type=="assistant" and .message.usage))
+        | select(length > 0)
+        | .[0]
+        | [ .message.model // "unknown",
+            ( (.message.usage.input_tokens // 0)
+            + (.message.usage.cache_creation_input_tokens // 0)
+            + (.message.usage.cache_read_input_tokens // 0) ) ]
+        | @tsv
+      ' 2>/dev/null
+  )
+fi
 
-[ -z "${data:-}" ] && exit 0
-
-model_id="${data%	*}"
-tokens="${data##*	}"
+if [ -n "${data:-}" ]; then
+  model_id="${data%	*}"
+  tokens="${data##*	}"
+else
+  # Fresh session path: get model from stdin JSON, tokens=0.
+  model_id=""
+  if [ -n "$input" ]; then
+    model_id=$(/usr/bin/jq -r '.model.id // .model.display_name // .model // "unknown"' <<<"$input" 2>/dev/null)
+  fi
+  [ -z "${model_id:-}" ] || [ "$model_id" = "null" ] && model_id="unknown"
+  tokens=0
+fi
 
 read -r family display_model < <(
   /bin/echo "$model_id" \
