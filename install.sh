@@ -49,20 +49,19 @@ fi
 echo ""
 echo "Next steps:"
 echo ""
-echo "1. Register claude-status as Stop, SessionStart, AND SessionEnd hooks in ~/.claude/settings.json."
-echo "   Add to .hooks.Stop[0].hooks, .hooks.SessionStart[0].hooks, and .hooks.SessionEnd[0].hooks (create structures if missing):"
+echo "1. Register claude-status as Stop, SessionStart, and SessionEnd hooks in ~/.claude/settings.json."
+echo "   Easy path (idempotent, backs up settings.json, appends without overwriting existing hooks):"
+echo ""
+echo "       $REPO_DIR/install-hooks.sh"
+echo ""
+echo "   Manual path: add this entry to .hooks.Stop[0].hooks, .hooks.SessionStart[0].hooks,"
+echo "   AND .hooks.SessionEnd[0].hooks (create the structure if missing):"
 echo ""
 echo '       {'
 echo '         "type": "command",'
 echo '         "command": "~/bin/claude-status",'
 echo '         "timeout": 5'
 echo '       }'
-echo ""
-echo "   For a programmatic merge:"
-echo ""
-echo "       jq '.hooks.Stop[0].hooks = [{\"type\":\"command\",\"command\":\"~/bin/claude-status\",\"timeout\":5}] + (.hooks.Stop[0].hooks // [])' \\"
-echo "         ~/.claude/settings.json > /tmp/settings.new && \\"
-echo "         mv /tmp/settings.new ~/.claude/settings.json"
 echo ""
 echo "2. In iTerm2: Settings -> Profiles -> Session -> Configure Status Bar..."
 echo "   Drag in an Interpolated String component and set:"

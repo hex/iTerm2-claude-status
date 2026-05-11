@@ -22,7 +22,10 @@ remove() {
 echo "Uninstalling iTerm2-claude-status"
 remove "$DATA_TARGET"
 
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 echo ""
 echo "Manual cleanup still required:"
 echo "  - Remove the claude-status entries from .hooks.Stop, .hooks.SessionStart, and .hooks.SessionEnd in ~/.claude/settings.json"
+echo "    Easy path: $REPO_DIR/uninstall-hooks.sh"
 echo "  - Remove the Interpolated String component from iTerm2's status bar"

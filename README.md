@@ -36,7 +36,21 @@ Three steps — none touch your dotfiles automatically.
 
 ### 1. Register claude-status as Stop, SessionStart, and SessionEnd hooks
 
-In `~/.claude/settings.json`, add this entry to all three of `.hooks.Stop[0].hooks`, `.hooks.SessionStart[0].hooks`, and `.hooks.SessionEnd[0].hooks`:
+The easy path — run the bundled helper:
+
+```bash
+./install-hooks.sh
+```
+
+This idempotently adds `~/bin/claude-status` as the first entry in `.hooks.Stop[0].hooks`, `.hooks.SessionStart[0].hooks`, and `.hooks.SessionEnd[0].hooks` in `~/.claude/settings.json`. Existing entries in those arrays are preserved. Re-running is safe — it detects existing registrations and does nothing if already installed. A timestamped backup of `settings.json` is created before any changes.
+
+The three hooks together cover the bar's lifecycle:
+
+- **Stop** updates the bar after each assistant turn (when token counts change).
+- **SessionStart** populates the bar when a pane opens so it doesn't stay blank waiting for the first response.
+- **SessionEnd** clears the bar (emits empty user var) so closed sessions don't leave ghost data.
+
+If you'd rather edit `settings.json` yourself, add this entry to all three hook arrays:
 
 ```json
 {
@@ -46,25 +60,9 @@ In `~/.claude/settings.json`, add this entry to all three of `.hooks.Stop[0].hoo
 }
 ```
 
-- **Stop** updates the bar after each assistant turn (when token counts change).
-- **SessionStart** populates the bar when a pane opens so it doesn't stay blank waiting for the first response.
-- **SessionEnd** clears the bar (emits empty user var) so closed sessions don't leave ghost data.
-
-For programmatic merging into an existing settings.json:
-
-```bash
-jq '
-  (.hooks.Stop // [{"hooks":[]}]) as $stop
-  | (.hooks.SessionStart // [{"hooks":[]}]) as $start
-  | (.hooks.SessionEnd // [{"hooks":[]}]) as $end
-  | .hooks.Stop = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($stop[0].hooks // [])}]
-  | .hooks.SessionStart = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($start[0].hooks // [])}]
-  | .hooks.SessionEnd = [{"hooks": [{"type":"command","command":"~/bin/claude-status","timeout":5}] + ($end[0].hooks // [])}]
-' ~/.claude/settings.json > /tmp/settings.new && \
-  mv /tmp/settings.new ~/.claude/settings.json
-```
-
 Adding it as the *first* entry in each array means it runs before any blocking hook (e.g., a discoveries reminder).
+
+> **Note**: Claude Code occasionally rewrites `~/.claude/settings.json` from its own UI (theme changes, plugin toggles, etc.) and can strip hook entries it doesn't track. If the bar stops updating, re-run `./install-hooks.sh` — it's safe to run anytime and only adds what's missing.
 
 ### 2. Add the iTerm2 status bar component
 
@@ -196,14 +194,16 @@ These are sketches. None of them ship today; they're documented so you (or futur
 
 ## Uninstall
 
+Two scripts, run in either order:
+
 ```bash
 cd ~/GitHub/iTerm2-claude-status
-./uninstall.sh
+./uninstall-hooks.sh    # removes claude-status from settings.json hooks (leaves other hooks intact, backs up first)
+./uninstall.sh          # removes the ~/bin/claude-status symlink
 ```
 
-The script removes only the symlink it created. You'll still need to manually:
-- Remove the `claude-status` entries from `.hooks.Stop`, `.hooks.SessionStart`, and `.hooks.SessionEnd` in `~/.claude/settings.json`
-- Remove the Interpolated String component from iTerm2
+You'll still need to manually:
+- Remove the Interpolated String component from iTerm2's status bar (Settings → Profiles → Session → Configure Status Bar)
 
 ## Limitations
 
