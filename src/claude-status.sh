@@ -7,6 +7,13 @@ set -u
 TRACK_LEN=10
 PROJECTS_DIR="$HOME/.claude/projects"
 
+# Threshold emojis. Override via env vars; set to "" (without unsetting) to omit.
+# `${VAR-default}` keeps the default only when the var is unset, so an explicit
+# empty string disables that emoji slot.
+EMOJI_LOW="${CLAUDE_STATUS_EMOJI_LOW-🟢}"
+EMOJI_MID="${CLAUDE_STATUS_EMOJI_MID-🟡}"
+EMOJI_HIGH="${CLAUDE_STATUS_EMOJI_HIGH-🔴}"
+
 emit_osc() {
   local b64
   b64=$(/bin/echo -n "$1" | /usr/bin/base64)
@@ -126,9 +133,9 @@ else
   tokens_display="$tokens"
 fi
 
-if   [ "$pct" -ge 85 ]; then emoji="🔴"
-elif [ "$pct" -ge 60 ]; then emoji="🟡"
-else                          emoji="🟢"
+if   [ "$pct" -ge 85 ]; then emoji="$EMOJI_HIGH"
+elif [ "$pct" -ge 60 ]; then emoji="$EMOJI_MID"
+else                          emoji="$EMOJI_LOW"
 fi
 
 emit_osc "$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"

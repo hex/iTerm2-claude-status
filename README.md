@@ -141,14 +141,33 @@ export CLAUDE_CONTEXT_LIMIT=200000   # if you're running Opus on default 200k co
 
 The hook inherits the value from Claude Code's process environment.
 
-### Thresholds
+### Thresholds & emoji
 
 Three buckets, configured at the bottom of `src/claude-status.sh`:
 - 🟢 below 60%
 - 🟡 60% – 84%
 - 🔴 85% and above
 
-Edit the script to taste. Symlinks point at the repo source, so changes take effect on Claude Code's next assistant turn.
+Override the emoji via env vars (set in your shell rc, or in the hook command's environment):
+
+```bash
+export CLAUDE_STATUS_EMOJI_LOW="🟢"    # default
+export CLAUDE_STATUS_EMOJI_MID="🟡"    # default
+export CLAUDE_STATUS_EMOJI_HIGH="🔴"   # default
+```
+
+Set any to an empty string to remove that segment entirely:
+
+```bash
+export CLAUDE_STATUS_EMOJI_LOW=""       # no green dot when context is low
+```
+
+Examples:
+- Hourglass/warning/fire: `⌛` / `⚠️` / `🔥`
+- ASCII-only: `ok` / `warn` / `HIGH`
+- Disabled: all three set to `""`
+
+To change the *threshold percentages* (60 and 85), edit the `if`-cascade in `src/claude-status.sh` directly. Symlinks point at the repo source, so edits take effect on the next hook fire.
 
 ### Per-family glyph
 
