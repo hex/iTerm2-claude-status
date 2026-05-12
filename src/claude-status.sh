@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Claude Code Stop/SessionStart/SessionEnd hook. Emits an OSC 1337
-# ABOUTME: SetUserVar to /dev/tty so iTerm2 renders model + context in user.claudeStatus.
+# ABOUTME: Claude Code Stop/SessionStart/SessionEnd hook. Resolves the user's
+# ABOUTME: TTY and emits OSC 1337 SetUserVar so iTerm2 renders user.claudeStatus.
 
 set -u
 
@@ -21,16 +21,40 @@ GLYPH_UNKNOWN="${CLAUDE_STATUS_GLYPH_UNKNOWN-✱}"
 BAR_FILL="${CLAUDE_STATUS_BAR_FILL-●}"
 BAR_EMPTY="${CLAUDE_STATUS_BAR_EMPTY-─}"
 
+find_tty() {
+  # Hook subprocesses have no controlling terminal (Claude Code setsid's them),
+  # so /dev/tty fails. Find the user's actual TTY device path via env var or
+  # by walking up the process tree.
+  if [ -n "${TTY:-}" ] && [ -w "$TTY" ]; then
+    /bin/echo "$TTY"; return 0
+  fi
+  local p="$PPID"
+  while [ -n "$p" ] && [ "$p" != "1" ] && [ "$p" != "0" ]; do
+    local t
+    t=$(/bin/ps -p "$p" -o tty= 2>/dev/null | /usr/bin/tr -d ' ')
+    if [ -n "$t" ] && [ "$t" != "??" ] && [ -w "/dev/$t" ]; then
+      /bin/echo "/dev/$t"; return 0
+    fi
+    p=$(/bin/ps -p "$p" -o ppid= 2>/dev/null | /usr/bin/tr -d ' ')
+  done
+  return 1
+}
+
 emit_osc() {
   local b64
   b64=$(/bin/echo -n "$1" | /usr/bin/base64)
   local osc
   osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
+  local seq
   if [ -n "${TMUX:-}" ]; then
-    { /usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc" > /dev/tty; } 2>/dev/null || true
+    seq=$(/usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc")
   else
-    { /usr/bin/printf '%s' "$osc" > /dev/tty; } 2>/dev/null || true
+    seq="$osc"
   fi
+
+  local target
+  target=$(find_tty) || return 0
+  /usr/bin/printf '%s' "$seq" >> "$target" 2>/dev/null || true
 }
 
 input=""
@@ -149,13 +173,4 @@ elif [ "$pct" -ge 60 ]; then emoji="$EMOJI_MID"
 else                          emoji="$EMOJI_LOW"
 fi
 
-final_text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
-emit_osc "$final_text"
-
-# Workaround: on SessionStart, Claude Code's TUI is mid-render and our OSC
-# bytes can be lost in the byte-stream race. Re-emit after a short delay so
-# the second emit lands once the TUI has settled. Backgrounded so the hook
-# returns immediately.
-if [ "$hook_event" = "SessionStart" ]; then
-  ( /bin/sleep 1 && emit_osc "$final_text" ) &
-fi
+emit_osc "$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
