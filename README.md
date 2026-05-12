@@ -171,11 +171,42 @@ To change the *threshold percentages* (60 and 85), edit the `if`-cascade in `src
 
 ### Per-family glyph
 
+Defaults:
 - **✦** Opus
 - **✧** Sonnet
-- **✱** Haiku (and unknown models)
+- **✱** Haiku
+- **✱** Unknown models
 
-Mapping at the `case "$family" in ... esac` block in `claude-status.sh`.
+Override via env vars (same empty-string-disables semantics as the emoji vars):
+
+```bash
+export CLAUDE_STATUS_GLYPH_OPUS="🤖"
+export CLAUDE_STATUS_GLYPH_SONNET="🎼"
+export CLAUDE_STATUS_GLYPH_HAIKU="🪶"
+export CLAUDE_STATUS_GLYPH_UNKNOWN="?"
+```
+
+### Bar characters
+
+Defaults:
+- **●** (filled) for the moving dot position
+- **─** (empty) for the rest of the track
+
+Override:
+
+```bash
+export CLAUDE_STATUS_BAR_FILL="█"
+export CLAUDE_STATUS_BAR_EMPTY="░"
+```
+
+Combined customization examples:
+
+| Style | Render |
+|---|---|
+| Default | `✦ Opus 4.7  ─────●────  635k (63%) 🟡` |
+| Blocky | `🤖 Opus 4.7  ░░░░░█░░░░  635k (63%) 🟡` |
+| Minimal ASCII | `= Opus 4.7  -----=----  635k (63%)` *(emoji disabled)* |
+| Dots | `• Opus 4.7  ·····●····  635k (63%) 🟡` |
 
 ### Bar resolution
 

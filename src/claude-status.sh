@@ -7,12 +7,19 @@ set -u
 TRACK_LEN=10
 PROJECTS_DIR="$HOME/.claude/projects"
 
-# Threshold emojis. Override via env vars; set to "" (without unsetting) to omit.
-# `${VAR-default}` keeps the default only when the var is unset, so an explicit
-# empty string disables that emoji slot.
+# All visual elements are overrideable via env vars. `${VAR-default}` keeps the
+# default only when the var is unset, so `export FOO=""` explicitly disables.
 EMOJI_LOW="${CLAUDE_STATUS_EMOJI_LOW-🟢}"
 EMOJI_MID="${CLAUDE_STATUS_EMOJI_MID-🟡}"
 EMOJI_HIGH="${CLAUDE_STATUS_EMOJI_HIGH-🔴}"
+
+GLYPH_OPUS="${CLAUDE_STATUS_GLYPH_OPUS-✦}"
+GLYPH_SONNET="${CLAUDE_STATUS_GLYPH_SONNET-✧}"
+GLYPH_HAIKU="${CLAUDE_STATUS_GLYPH_HAIKU-✱}"
+GLYPH_UNKNOWN="${CLAUDE_STATUS_GLYPH_UNKNOWN-✱}"
+
+BAR_FILL="${CLAUDE_STATUS_BAR_FILL-●}"
+BAR_EMPTY="${CLAUDE_STATUS_BAR_EMPTY-─}"
 
 emit_osc() {
   local b64
@@ -95,10 +102,10 @@ else
 fi
 
 case "$family" in
-  Opus)   glyph="✦" ;;
-  Sonnet) glyph="✧" ;;
-  Haiku)  glyph="✱" ;;
-  *)      glyph="✱" ;;
+  Opus)   glyph="$GLYPH_OPUS"   ;;
+  Sonnet) glyph="$GLYPH_SONNET" ;;
+  Haiku)  glyph="$GLYPH_HAIKU"  ;;
+  *)      glyph="$GLYPH_UNKNOWN" ;;
 esac
 
 # Per-family context-window default. Override with CLAUDE_CONTEXT_LIMIT env var.
@@ -123,7 +130,7 @@ pos=$(( pct * (TRACK_LEN - 1) / 100 ))
 bar=""
 i=0
 while [ "$i" -lt "$TRACK_LEN" ]; do
-  if [ "$i" -eq "$pos" ]; then bar="${bar}●"; else bar="${bar}─"; fi
+  if [ "$i" -eq "$pos" ]; then bar="${bar}${BAR_FILL}"; else bar="${bar}${BAR_EMPTY}"; fi
   i=$((i + 1))
 done
 
