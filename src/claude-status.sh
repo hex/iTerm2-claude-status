@@ -43,9 +43,13 @@ if [ ! -t 0 ]; then
   done
 fi
 
+hook_event=""
+if [ -n "$input" ]; then
+  hook_event=$(/usr/bin/jq -r '.hook_event_name // empty' <<<"$input" 2>/dev/null)
+fi
+
 # SessionEnd path: clear the bar so it doesn't show ghost data after Claude exits.
-if [ -n "$input" ] && \
-   [ "$(/usr/bin/jq -r '.hook_event_name // empty' <<<"$input" 2>/dev/null)" = "SessionEnd" ]; then
+if [ "$hook_event" = "SessionEnd" ]; then
   emit_osc ""
   exit 0
 fi
@@ -145,4 +149,13 @@ elif [ "$pct" -ge 60 ]; then emoji="$EMOJI_MID"
 else                          emoji="$EMOJI_LOW"
 fi
 
-emit_osc "$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
+final_text="$glyph $display_model  $bar  $tokens_display ($pct%) $emoji"
+emit_osc "$final_text"
+
+# Workaround: on SessionStart, Claude Code's TUI is mid-render and our OSC
+# bytes can be lost in the byte-stream race. Re-emit after a short delay so
+# the second emit lands once the TUI has settled. Backgrounded so the hook
+# returns immediately.
+if [ "$hook_event" = "SessionStart" ]; then
+  ( /bin/sleep 1 && emit_osc "$final_text" ) &
+fi
