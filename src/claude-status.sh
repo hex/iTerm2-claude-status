@@ -43,18 +43,20 @@ find_tty() {
 emit_osc() {
   local b64
   b64=$(/bin/echo -n "$1" | /usr/bin/base64)
-  local osc
-  osc=$(/usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\007' "$b64")
-  local seq
-  if [ -n "${TMUX:-}" ]; then
-    seq=$(/usr/bin/printf '\033Ptmux;\033%s\033\\' "$osc")
-  else
-    seq="$osc"
-  fi
-
   local target
   target=$(find_tty) || return 0
-  /usr/bin/printf '%s' "$seq" >> "$target" 2>/dev/null || true
+
+  # OSC terminator is ESC ST (\e\\) rather than BEL (\a). iTerm2 marks a
+  # session as "had bell activity" on every BEL byte received, even inside
+  # a well-formed OSC sequence — using ESC ST avoids that side effect.
+  # Inside tmux passthrough every inner ESC must be doubled per DCS rules.
+  if [ -n "${TMUX:-}" ]; then
+    /usr/bin/printf '\033Ptmux;\033\033]1337;SetUserVar=claudeStatus=%s\033\033\\\033\\' "$b64" \
+      >> "$target" 2>/dev/null || true
+  else
+    /usr/bin/printf '\033]1337;SetUserVar=claudeStatus=%s\033\\' "$b64" \
+      >> "$target" 2>/dev/null || true
+  fi
 }
 
 input=""
